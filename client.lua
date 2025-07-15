@@ -627,13 +627,20 @@ AddEventHandler('onResourceStart', function(resourceName)
     TriggerServerEvent('gs-blackmarket:getVendorLocation')
 end)
 
--- Resource Stop
+RegisterNetEvent('playerSpawned')
+AddEventHandler('playerSpawned', function()
+    -- Request vendor location from server when player spawns
+    TriggerServerEvent('gs-blackmarket:getVendorLocation')
+end)
+
+
 AddEventHandler('onResourceStop', function(resourceName)
     if resourceName ~= GetCurrentResourceName() then return end
     
     -- Clean up resources
     if vendorPed then
-        DeletePed(vendorPed)
+        DeleteEntity(vendorPed)
+        vendorPed = nil
     end
     
     CleanupPickup()

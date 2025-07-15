@@ -65,19 +65,21 @@ Config.MarketFluctuation = {
 
 Config.VendorLocations = {
     {
-        coords = vector3(2482.5471, 3722.4255, 43.9216),  -- Sandy Shores scrapyard
+        coords = vector3(
+            2482.5471, 3722.4255, 43.9216
+        ),  -- Sandy Shores scrapyard
         heading = 41.9081,
         scenario = "WORLD_HUMAN_SMOKING",
         ped = "g_m_m_chemwork_01"
     },
     {
-        coords = vector3(-1134.1439, -1568.7552, 4.4037),  -- Del Perro beach parking lot
-        heading = 217.92,
+        coords = vector3(-1134.6465, -1569.0308, 4.4062),  -- Del Perro beach parking lot
+        heading = 216,
         scenario = "WORLD_HUMAN_LEANING",
         ped = "g_m_y_lost_03"
     },
     {
-        coords = vector3(85.86, -1959.48, 20.75),  -- Under Olympic Freeway
+        coords = vector3(85.86, -1959.48, 21.75),  -- Under Olympic Freeway
         heading = 320.5,
         scenario = "WORLD_HUMAN_STAND_IMPATIENT",
         ped = "s_m_y_dealer_01"
@@ -89,7 +91,8 @@ Config.VendorLocations = {
         ped = "s_m_m_dockwork_01"
     },
     {
-        coords = vector3(1533.9821, 3797.1023, 34.4516),  
+        coords = vector3(1533.9821, 3797.1023, 34.4516
+        ),  
         heading = 289.0539,
         scenario = "WORLD_HUMAN_AA_SMOKE",
         ped = "a_m_m_hillbilly_01"

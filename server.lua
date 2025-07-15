@@ -48,10 +48,6 @@ local function SelectRandomVendorLocation()
     local index = math.random(1, #Config.VendorLocations)
     currentVendorLocation = Config.VendorLocations[index]
     
-    -- Log the location for admins
-    local coords = currentVendorLocation.coords
-    print('[GS-BlackMarket] Current black market location: ' .. coords.x .. ', ' .. coords.y .. ', ' .. coords.z)
-    
     return currentVendorLocation
 end
 
@@ -295,6 +291,8 @@ end
 AddEventHandler('onResourceStart', function(resourceName)
     if resourceName ~= GetCurrentResourceName() then return end
     
+    -- Initialize the market
+    print('[GS-BlackMarket] Initializing black market...')
     SelectRandomVendorLocation()
     InitializePriceMultipliers()
     UpdatePriceMultipliers()
@@ -308,6 +306,24 @@ AddEventHandler('onResourceStart', function(resourceName)
             end
         end)
     end
+    
+    -- Print location at the end with visual separation for better visibility
+    Citizen.SetTimeout(1000, function()
+        print('\n\n')
+        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        print('                      BLACK MARKET LOCATION                         ')
+        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        
+        if currentVendorLocation then
+            local coords = currentVendorLocation.coords
+            print('^3[GS-BlackMarket] ^0Current black market location: ^2' .. coords.x .. ', ' .. coords.y .. ', ' .. coords.z .. '^0')
+        else
+            print('^1[GS-BlackMarket] ^0No vendor location selected!')
+        end
+        
+        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        print('\n')
+    end)
 end)
 
 -- Get Current Vendor Location
@@ -323,6 +339,7 @@ AddEventHandler('gs-blackmarket:getMarketItems', function()
     local src = source
     TriggerClientEvent('gs-blackmarket:setMarketItems', src, Config.Categories, currentPriceMultipliers)
 end)
+
 -- Update the checkout cart event handler in server.lua
 RegisterNetEvent('gs-blackmarket:checkoutCart')
 AddEventHandler('gs-blackmarket:checkoutCart', function(items)
@@ -494,3 +511,49 @@ AddEventHandler('gs-blackmarket:collectOrder', function(orderData)
         TriggerClientEvent('gs-blackmarket:notification', src, Config.Notifications.inventoryFull, 'error')
     end
 end)
+
+-- Command to print current black market location (for admins)
+RegisterCommand('blackmarketlocation', function(source, args, rawCommand)
+    local src = source
+    
+    -- Check if player is admin (you might want to add your own admin check here)
+    if src > 0 then -- If executed by a player
+        local isAdmin = false
+        
+        if framework == 'qbcore' then
+            isAdmin = QBCore.Functions.HasPermission(src, 'admin')
+        elseif framework == 'esx' then
+            local xPlayer = ESX.GetPlayerFromId(src)
+            isAdmin = xPlayer.getGroup() == 'admin'
+        end
+        
+        if not isAdmin then
+            TriggerClientEvent('gs-blackmarket:notification', src, 'You do not have permission to use this command', 'error')
+            return
+        end
+    end
+    
+    -- Print location
+    if currentVendorLocation then
+        local coords = currentVendorLocation.coords
+        if src == 0 then -- Console
+            print('\n\n')
+            print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+            print('                      BLACK MARKET LOCATION                         ')
+            print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+            print('^3[GS-BlackMarket] ^0Current black market location: ^2' .. coords.x .. ', ' .. coords.y .. ', ' .. coords.z .. '^0')
+            print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+            print('\n')
+        else -- Player
+            TriggerClientEvent('gs-blackmarket:notification', src, 'Black Market Location: ' .. coords.x .. ', ' .. coords.y .. ', ' .. coords.z, 'info')
+            -- Set waypoint for admin
+            TriggerClientEvent('gs-blackmarket:setWaypoint', src, coords)
+        end
+    else
+        if src == 0 then
+            print('^1[GS-BlackMarket] ^0No vendor location selected!')
+        else
+            TriggerClientEvent('gs-blackmarket:notification', src, 'No vendor location available', 'error')
+        end
+    end
+end, false)
