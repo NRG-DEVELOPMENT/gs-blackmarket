@@ -1,383 +1,39 @@
+local Config = {}
+
+local function LoadConfig()
+    Config = exports[GetCurrentResourceName()]:GetConfig()
+end
+
+local isMenuOpen = false
+local currentDealerData = nil
+local currentDealerItems = nil
+local playerCoords = nil
+local dealerCoords = nil
+local dealerBlips = {}
+local dealerPeds = {}
+local dealerZones = {}
+local dealerCooldowns = {}
+local lastPurchaseTime = 0
+local purchaseCooldown = 1000
+local isPlayerLoaded = false
+local playerJob = nil
+local playerGang = nil
+local playerCitizenId = nil
+local playerInventory = {}
+local playerMoney = 0
+local playerBankMoney = 0
+local playerItems = {}
+
 local QBCore = nil
 local ESX = nil
-local currentVendorLocation = nil
-local currentPriceMultipliers = {}
-local activeOrder = nil
-local pickupBlip = nil
-local pickupPed = nil
-local vendorPed = nil
-local currentCategory = nil
+local framework = nil
 
--- Animation Functions
-function PlayTransactionAnimation()
-    local playerPed = PlayerPedId()
-    local animDict = "mp_common"
-    local animName = "givetake1_a"
-    
-    RequestAnimDict(animDict)
-    while not HasAnimDictLoaded(animDict) do
-        Citizen.Wait(10)
-    end
-    
-    TaskPlayAnim(playerPed, animDict, animName, 8.0, -8.0, -1, 0, 0, false, false, false)
-    Citizen.Wait(1000)
-    ClearPedTasks(playerPed)
-end
+RegisterNetEvent('gs-blackmarket:client:openMenu')
+RegisterNetEvent('gs-blackmarket:client:closeMenu')
+RegisterNetEvent('gs-blackmarket:client:updatePrices')
+RegisterNetEvent('gs-blackmarket:client:notifyPlayer')
+RegisterNetEvent('gs-blackmarket:client:syncCooldown')
 
-function PlayPhoneAnimation(duration)
-    local playerPed = PlayerPedId()
-    local animDict = "cellphone@"
-    local animName = "cellphone_text_read_base"
-    local prop = "prop_npc_phone_02"
-    local propBone = 28422
-    
-    -- Load animation dictionary
-    RequestAnimDict(animDict)
-    while not HasAnimDictLoaded(animDict) do
-        Citizen.Wait(10)
-    end
-    
-    -- Create and attach phone prop
-    local x, y, z = table.unpack(GetEntityCoords(playerPed))
-    local phoneModel = GetHashKey(prop)
-    
-    RequestModel(phoneModel)
-    while not HasModelLoaded(phoneModel) do
-        Citizen.Wait(10)
-    end
-    
-    local phoneObj = CreateObject(phoneModel, x, y, z + 0.2, true, true, true)
-    local boneIndex = GetPedBoneIndex(playerPed, propBone)
-    
-    AttachEntityToEntity(phoneObj, playerPed, boneIndex, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, true, true, false, true, 1, true)
-    
-    -- Play animation
-    TaskPlayAnim(playerPed, animDict, animName, 3.0, -1, -1, 50, 0, false, false, false)
-    
-    -- Wait for specified duration
-    Citizen.Wait(duration)
-    
-    -- Clean up
-    DeleteObject(phoneObj)
-    ClearPedTasks(playerPed)
-end
-
-function PlayPickupAnimation()
-    local playerPed = PlayerPedId()
-    local animDict = "mp_am_hold_up"
-    local animName = "purchase_beerbox_shopkeeper"
-    
-    RequestAnimDict(animDict)
-    while not HasAnimDictLoaded(animDict) do
-        Citizen.Wait(10)
-    end
-    
-    TaskPlayAnim(playerPed, animDict, animName, 8.0, -8.0, -1, 0, 0, false, false, false)
-    Citizen.Wait(1000)
-    ClearPedTasks(playerPed)
-end
-
--- Animation Event Handlers
-RegisterNetEvent('gs-blackmarket:playVendorAnimation')
-AddEventHandler('gs-blackmarket:playVendorAnimation', function()
-    if vendorPed then
-        local animDict = "mp_common"
-        local animName = "givetake1_b"
-        
-        RequestAnimDict(animDict)
-        while not HasAnimDictLoaded(animDict) do
-            Wait(10)
-        end
-        
-        TaskPlayAnim(vendorPed, animDict, animName, 8.0, -8.0, -1, 0, 0, false, false, false)
-        Citizen.Wait(1000)
-        if vendorPed then
-            if currentVendorLocation and currentVendorLocation.scenario then
-                TaskStartScenarioInPlace(vendorPed, currentVendorLocation.scenario, 0, true)
-            else
-                ClearPedTasks(vendorPed)
-            end
-        end
-    end
-end)
-
-RegisterNetEvent('gs-blackmarket:playPickupPedAnimation')
-AddEventHandler('gs-blackmarket:playPickupPedAnimation', function()
-    if pickupPed then
-        local animDict = "mp_am_hold_up"
-        local animName = "holdup_victim_20s_bag_drop"
-        
-        RequestAnimDict(animDict)
-        while not HasAnimDictLoaded(animDict) do
-            Wait(10)
-        end
-        
-        TaskPlayAnim(pickupPed, animDict, animName, 8.0, -8.0, -1, 0, 0, false, false, false)
-        Citizen.Wait(1000)
-        if pickupPed and activeOrder and activeOrder.location then
-            if activeOrder.location.scenario then
-                TaskStartScenarioInPlace(pickupPed, activeOrder.location.scenario, 0, true)
-            else
-                ClearPedTasks(pickupPed)
-            end
-        end
-    end
-end)
-
--- Framework Detection
-local function LoadFramework()
-    if Config.Framework == 'auto' or Config.Framework == 'qbcore' then
-        if GetResourceState('qb-core') == 'started' then
-            QBCore = exports['qb-core']:GetCoreObject()
-            return 'qbcore'
-        end
-    end
-    
-    if Config.Framework == 'auto' or Config.Framework == 'esx' then
-        if GetResourceState('es_extended') == 'started' then
-            ESX = exports['es_extended']:getSharedObject()
-            return 'esx'
-        end
-    end
-    
-    return nil
-end
-
--- Target System Detection
-local function SetupTargetSystem()
-    local targetSystem = Config.Target
-    
-    if targetSystem == 'auto' then
-        if GetResourceState('ox_target') == 'started' then
-            targetSystem = 'ox'
-        elseif GetResourceState('qb-target') == 'started' then
-            targetSystem = 'qb'
-        else
-            print('[GS-BlackMarket] No target system found, defaulting to basic interaction')
-            targetSystem = 'basic'
-        end
-    end
-    
-    return targetSystem
-end
-
-local framework = LoadFramework()
-local targetSystem = SetupTargetSystem()
-
--- Notification Function
-function ShowNotification(message, type)
-    if framework == 'qbcore' then
-        QBCore.Functions.Notify(message, type)
-    elseif framework == 'esx' then
-        ESX.ShowNotification(message)
-    else
-        -- Fallback notification
-        SetNotificationTextEntry('STRING')
-        AddTextComponentString(message)
-        DrawNotification(false, false)
-    end
-end
-
--- Get the appropriate ped model for the current category
-local function GetCurrentCategoryPed()
-    if not currentCategory then return Config.DefaultPed end
-    
-    for _, category in pairs(Config.Categories) do
-        if category.name == currentCategory then
-            return category.ped
-        end
-    end
-    
-    return Config.DefaultPed
-end
-
--- Create Vendor Ped
-local function CreateVendorPed()
-    if not currentVendorLocation then return end
-    
-    -- Get the ped model based on configuration
-    local pedModel
-    if Config.UseCategoryPeds then
-        pedModel = GetCurrentCategoryPed()
-    else
-        pedModel = currentVendorLocation.ped or Config.DefaultPed
-    end
-    
-    local model = GetHashKey(pedModel)
-    
-    RequestModel(model)
-    while not HasModelLoaded(model) do
-        Wait(10)
-    end
-    
-    vendorPed = CreatePed(4, model, 
-        currentVendorLocation.coords.x, 
-        currentVendorLocation.coords.y, 
-        currentVendorLocation.coords.z - 1.0, 
-        currentVendorLocation.heading, 
-        false, 
-        true
-    )
-    
-    SetEntityAsMissionEntity(vendorPed, true, true)
-    SetBlockingOfNonTemporaryEvents(vendorPed, true)
-    SetPedDiesWhenInjured(vendorPed, false)
-    SetPedCanPlayAmbientAnims(vendorPed, true)
-    SetPedCanRagdollFromPlayerImpact(vendorPed, false)
-    SetEntityInvincible(vendorPed, true)
-    FreezeEntityPosition(vendorPed, true)
-    
-    if currentVendorLocation.scenario then
-        TaskStartScenarioInPlace(vendorPed, currentVendorLocation.scenario, 0, true)
-    end
-    
-    -- Setup target interaction
-    if targetSystem == 'ox' then
-        exports.ox_target:addLocalEntity(vendorPed, {
-            {
-                name = 'gs_blackmarket_vendor',
-                icon = 'fas fa-shopping-bag',
-                label = 'Access Black Market',
-                onSelect = function()
-                    OpenBlackMarketMenu()
-                end,
-                distance = 2.0
-            }
-        })
-    elseif targetSystem == 'qb' then
-        exports['qb-target']:AddTargetEntity(vendorPed, {
-            options = {
-                {
-                    type = "client",
-                    icon = 'fas fa-shopping-bag',
-                    label = 'Access Black Market',
-                    action = function()
-                        OpenBlackMarketMenu()
-                    end,
-                }
-            },
-            distance = 2.0
-        })
-    else
-        -- Basic interaction
-        Citizen.CreateThread(function()
-            local textShown = false
-            while vendorPed do
-                local playerPed = PlayerPedId()
-                local coords = GetEntityCoords(playerPed)
-                local pedCoords = GetEntityCoords(vendorPed)
-                local dist = #(coords - pedCoords)
-                
-                if dist < 2.0 then
-                    if not textShown then
-                        textShown = true
-                        BeginTextCommandDisplayHelp('STRING')
-                        AddTextComponentSubstringPlayerName('Press ~INPUT_CONTEXT~ to access the Black Market')
-                        EndTextCommandDisplayHelp(0, false, true, -1)
-                    end
-                    
-                    if IsControlJustReleased(0, 38) then -- E key
-                        OpenBlackMarketMenu()
-                    end
-                else
-                    textShown = false
-                end
-                
-                Citizen.Wait(0)
-            end
-        end)
-    end
-end
-
--- Create Pickup Ped
-local function CreatePickupPed(location)
-    local model = GetHashKey(location.ped)
-    
-    RequestModel(model)
-    while not HasModelLoaded(model) do
-        Wait(10)
-    end
-    
-    pickupPed = CreatePed(4, model, 
-        location.coords.x, 
-        location.coords.y, 
-        location.coords.z - 1.0, 
-        location.heading, 
-        false, 
-        true
-    )
-    
-    SetEntityAsMissionEntity(pickupPed, true, true)
-    SetBlockingOfNonTemporaryEvents(pickupPed, true)
-    SetPedDiesWhenInjured(pickupPed, false)
-    SetPedCanPlayAmbientAnims(pickupPed, true)
-    SetPedCanRagdollFromPlayerImpact(pickupPed, false)
-    SetEntityInvincible(pickupPed, true)
-    FreezeEntityPosition(pickupPed, true)
-    
-    if location.scenario then
-        TaskStartScenarioInPlace(pickupPed, location.scenario, 0, true)
-    end
-    
-    -- Setup target interaction
-    if targetSystem == 'ox' then
-        exports.ox_target:addLocalEntity(pickupPed, {
-            {
-                name = 'gs_blackmarket_pickup',
-                icon = 'fas fa-box',
-                label = 'Collect Package',
-                onSelect = function()
-                    CollectOrder()
-                end,
-                distance = 2.0
-            }
-        })
-    elseif targetSystem == 'qb' then
-        exports['qb-target']:AddTargetEntity(pickupPed, {
-            options = {
-                {
-                    type = "client",
-                    icon = 'fas fa-box',
-                    label = 'Collect Package',
-                    action = function()
-                        CollectOrder()
-                    end,
-                }
-            },
-            distance = 2.0
-        })
-    else
-        -- Basic interaction
-        Citizen.CreateThread(function()
-            local textShown = false
-            while pickupPed do
-                local playerPed = PlayerPedId()
-                local coords = GetEntityCoords(playerPed)
-                local pedCoords = GetEntityCoords(pickupPed)
-                local dist = #(coords - pedCoords)
-                
-                if dist < 2.0 then
-                    if not textShown then
-                        textShown = true
-                        BeginTextCommandDisplayHelp('STRING')
-                        AddTextComponentSubstringPlayerName('Press ~INPUT_CONTEXT~ to collect your package')
-                        EndTextCommandDisplayHelp(0, false, true, -1)
-                    end
-                    
-                    if IsControlJustReleased(0, 38) then -- E key
-                        CollectOrder()
-                    end
-                else
-                    textShown = false
-                end
-                
-                Citizen.Wait(0)
-            end
-        end)
-    end
-end
-
--- Get item image from the inventory system
 local function GetItemImage(itemName)
     local inventoryType = Config.Inventory
     
@@ -392,256 +48,337 @@ local function GetItemImage(itemName)
     end
     
     if inventoryType == 'ox' then
-        -- For ox_inventory
         local items = exports.ox_inventory:Items()
         if items[itemName] then
             return items[itemName].name
         end
     elseif inventoryType == 'qb' then
-        -- For qb-inventory
         local QBCore = exports['qb-core']:GetCoreObject()
         local item = QBCore.Shared.Items[itemName]
         if item then
             return item.image
         end
     elseif inventoryType == 'esx' then
-        -- For ESX inventory (default to item name)
         return itemName
     end
     
     return itemName
 end
 
--- Create Pickup Blip
-local function CreatePickupBlip(coords)
-    if pickupBlip then
-        RemoveBlip(pickupBlip)
+Citizen.CreateThread(function()
+    LoadConfig()
+    
+    if GetResourceState('qb-core') == 'started' then
+        QBCore = exports['qb-core']:GetCoreObject()
+        framework = 'qb'
+    elseif GetResourceState('es_extended') == 'started' then
+        ESX = exports['es_extended']:getSharedObject()
+        framework = 'esx'
     end
     
-    pickupBlip = AddBlipForCoord(coords.x, coords.y, coords.z)
-    SetBlipSprite(pickupBlip, Config.Delivery.blipSettings.sprite)
-    SetBlipColour(pickupBlip, Config.Delivery.blipSettings.color)
-    SetBlipScale(pickupBlip, Config.Delivery.blipSettings.scale)
-    SetBlipAsShortRange(pickupBlip, true)
-    
-    BeginTextCommandSetBlipName("STRING")
-    AddTextComponentString(Config.Delivery.blipSettings.label)
-    EndTextCommandSetBlipName(pickupBlip)
-end
-
--- Remove Pickup Elements
-local function CleanupPickup()
-    if pickupBlip then
-        RemoveBlip(pickupBlip)
-        pickupBlip = nil
+    if framework == 'qb' then
+        Citizen.CreateThread(function()
+            while true do
+                if QBCore.Functions.GetPlayerData().citizenid ~= nil then
+                    isPlayerLoaded = true
+                    playerJob = QBCore.Functions.GetPlayerData().job
+                    playerGang = QBCore.Functions.GetPlayerData().gang
+                    playerCitizenId = QBCore.Functions.GetPlayerData().citizenid
+                    break
+                end
+                Citizen.Wait(100)
+            end
+        end)
+    elseif framework == 'esx' then
+        Citizen.CreateThread(function()
+            while ESX.GetPlayerData().job == nil do
+                Citizen.Wait(100)
+            end
+            isPlayerLoaded = true
+            playerJob = ESX.GetPlayerData().job
+        end)
     end
     
-    if pickupPed then
-        DeletePed(pickupPed)
-        pickupPed = nil
-    end
-    
-    activeOrder = nil
-end
-
--- Open Black Market Menu
-function OpenBlackMarketMenu()
-    -- Show loading spinner first
-    SendNUIMessage({
-        action = 'openMenu',
-        loading = true
-    })
-    
-    -- Request market items from server
-    TriggerServerEvent('gs-blackmarket:getMarketItems')
-end
-
--- Collect Order
-function CollectOrder()
-    if not activeOrder then return end
-    
-    -- Play pickup animation
-    PlayPickupAnimation()
-    
-    TriggerServerEvent('gs-blackmarket:collectOrder', {
-        items = activeOrder.items
-    })
-    
-    CleanupPickup()
-end
-
--- Default police alert handler (for when no dispatch system is available)
-RegisterNetEvent('gs-blackmarket:policeAlert')
-AddEventHandler('gs-blackmarket:policeAlert', function(coords, alertData, title, message)
-    -- Create alert blip
-    local alpha = 250
-    local blip = AddBlipForRadius(coords.x, coords.y, coords.z, 50.0)
-    
-    SetBlipHighDetail(blip, true)
-    SetBlipColour(blip, alertData.blipColor)
-    SetBlipAlpha(blip, alpha)
-    SetBlipAsShortRange(blip, true)
-    
-    -- Create marker blip
-    local markerBlip = AddBlipForCoord(coords.x, coords.y, coords.z)
-    SetBlipSprite(markerBlip, alertData.blipSprite)
-    SetBlipColour(markerBlip, alertData.blipColor)
-    SetBlipScale(markerBlip, alertData.blipScale)
-    SetBlipAsShortRange(markerBlip, false)
-    BeginTextCommandSetBlipName("STRING")
-    AddTextComponentString(title)
-    EndTextCommandSetBlipName(markerBlip)
-    
-    -- Show notification
-    ShowNotification(title .. ': ' .. message)
-    
-    -- Remove blips after duration
-    Citizen.CreateThread(function()
-        local endTime = GetGameTimer() + (Config.PoliceAlert.blipDuration * 1000)
-        local fadeTime = endTime - 5000
-        
-        while GetGameTimer() < endTime do
-            Citizen.Wait(100)
-            
-            if GetGameTimer() > fadeTime then
-                local newAlpha = math.floor((endTime - GetGameTimer()) / 5000 * 250)
-                SetBlipAlpha(blip, newAlpha)
+    if Config.ShowBlips then
+        for _, dealer in pairs(Config.Dealers) do
+            if dealer.blip and dealer.blip.enabled then
+                local blip = AddBlipForCoord(dealer.coords.x, dealer.coords.y, dealer.coords.z)
+                SetBlipSprite(blip, dealer.blip.sprite or 500)
+                SetBlipDisplay(blip, dealer.blip.display or 4)
+                SetBlipScale(blip, dealer.blip.scale or 0.7)
+                SetBlipColour(blip, dealer.blip.color or 1)
+                SetBlipAsShortRange(blip, true)
+                BeginTextCommandSetBlipName("STRING")
+                AddTextComponentString(dealer.blip.label or "Black Market")
+                EndTextCommandSetBlipName(blip)
+                
+                table.insert(dealerBlips, blip)
             end
         end
-        
-        RemoveBlip(blip)
-        RemoveBlip(markerBlip)
+    end
+    
+    if Config.ShowPeds then
+        Citizen.CreateThread(function()
+            for _, dealer in pairs(Config.Dealers) do
+                if dealer.ped and dealer.ped.enabled then
+                    RequestModel(dealer.ped.model or `a_m_y_mexthug_01`)
+                    while not HasModelLoaded(dealer.ped.model or `a_m_y_mexthug_01`) do
+                        Citizen.Wait(10)
+                    end
+                    
+                    local ped = CreatePed(4, dealer.ped.model or `a_m_y_mexthug_01`, dealer.coords.x, dealer.coords.y, dealer.coords.z - 1.0, dealer.coords.w or 0.0, false, false)
+                    FreezeEntityPosition(ped, true)
+                    SetEntityInvincible(ped, true)
+                    SetBlockingOfNonTemporaryEvents(ped, true)
+                    
+                    if dealer.ped.scenario then
+                        TaskStartScenarioInPlace(ped, dealer.ped.scenario, 0, true)
+                    end
+                    
+                    table.insert(dealerPeds, ped)
+                end
+            end
+        end)
+    end
+    
+    Citizen.CreateThread(function()
+        while true do
+            local playerPed = PlayerPedId()
+            playerCoords = GetEntityCoords(playerPed)
+            
+            local isNearDealer = false
+            local closestDealer = nil
+            local closestDistance = 1000.0
+            
+            for i, dealer in pairs(Config.Dealers) do
+                dealerCoords = vector3(dealer.coords.x, dealer.coords.y, dealer.coords.z)
+                local distance = #(playerCoords - dealerCoords)
+                
+                if distance < closestDistance then
+                    closestDistance = distance
+                    closestDealer = dealer
+                end
+                
+                if distance < dealer.interactionDistance then
+                    isNearDealer = true
+                    
+                    local canAccess = true
+                    
+                    if dealer.jobs and #dealer.jobs > 0 then
+                        canAccess = false
+                        for _, job in pairs(dealer.jobs) do
+                            if playerJob and playerJob.name == job then
+                                canAccess = true
+                                break
+                            end
+                        end
+                    end
+                    
+                    if dealer.gangs and #dealer.gangs > 0 then
+                        canAccess = false
+                        for _, gang in pairs(dealer.gangs) do
+                            if playerGang and playerGang.name == gang then
+                                canAccess = true
+                                break
+                            end
+                        end
+                    end
+                    
+                    local dealerId = dealer.id or i
+                    local cooldownTime = dealerCooldowns[dealerId] or 0
+                    local currentTime = GetGameTimer()
+                    local isOnCooldown = currentTime < cooldownTime
+                    
+                    if canAccess and not isOnCooldown and not isMenuOpen then
+                        DrawText3D(dealerCoords.x, dealerCoords.y, dealerCoords.z, dealer.interactionText or "Press ~g~E~w~ to access Black Market")
+                        
+                        if IsControlJustReleased(0, 38) then
+                            currentDealerData = dealer
+                            currentDealerItems = dealer.items
+                            OpenBlackMarketMenu()
+                        end
+                    elseif isOnCooldown then
+                        local remainingTime = math.ceil((cooldownTime - currentTime) / 1000)
+                        DrawText3D(dealerCoords.x, dealerCoords.y, dealerCoords.z, "Come back later. Cooldown: " .. remainingTime .. "s")
+                    elseif not canAccess then
+                        DrawText3D(dealerCoords.x, dealerCoords.y, dealerCoords.z, "You don't have access to this dealer")
+                    end
+                end
+            end
+            
+            Citizen.Wait(isNearDealer and 0 or 500)
+        end
     end)
 end)
 
--- NUI Callbacks
-RegisterNUICallback('closeMenu', function(data, cb)
-    SetNuiFocus(false, false)
-    cb('ok')
-end)
+local function ProcessItems(items)
+    local processedItems = {}
+    for i, item in pairs(items) do
+        local newItem = table.clone(item)
+        newItem.image = GetItemImage(item.name)
+        table.insert(processedItems, newItem)
+    end
+    return processedItems
+end
 
-RegisterNUICallback('placeOrder', function(data, cb)
-    -- Play transaction animation
-    PlayTransactionAnimation()
+function OpenBlackMarketMenu()
+    if isMenuOpen then return end
     
-    TriggerServerEvent('gs-blackmarket:placeOrder', data.item, data.quantity)
-    SetNuiFocus(false, false)
-    cb('ok')
-end)
+    isMenuOpen = true
+    
+    local processedItems = ProcessItems(currentDealerItems)
+    
+    TriggerServerEvent('gs-blackmarket:server:getPriceMultipliers', currentDealerData.id)
+    
+    SendNUIMessage({
+        action = 'openMenu',
+        items = processedItems,
+        priceMultipliers = {}
+    })
+    
+    SetNuiFocus(true, true)
+end
 
-RegisterNUICallback('checkoutCart', function(data, cb)
-    local items = data.items
+function CloseBlackMarketMenu()
+    if not isMenuOpen then return end
     
-    if not items or #items == 0 then
-        ShowNotification("Your cart is empty", "error")
-        cb('ok')
+    isMenuOpen = false
+    currentDealerData = nil
+    currentDealerItems = nil
+    
+    SetNuiFocus(false, false)
+    
+    SendNUIMessage({
+        action = 'closeMenu'
+    })
+end
+
+RegisterNUICallback('purchaseItem', function(data, cb)
+    if not isMenuOpen or not currentDealerData then
+        cb({ success = false, message = "Menu is not open" })
         return
     end
     
-    -- Play phone animation (ordering)
-    PlayPhoneAnimation(3000)
-    
-    -- Wait for animation to complete before sending the event
-    Citizen.SetTimeout(3000, function()
-        TriggerServerEvent('gs-blackmarket:checkoutCart', items)
-    end)
-    
-    cb('ok')
-end)
-
-RegisterNUICallback('changeCategory', function(data, cb)
-    currentCategory = data.category
-    
-    -- Update the vendor ped if using category-specific peds
-    if Config.UseCategoryPeds and vendorPed then
-        DeletePed(vendorPed)
-        CreateVendorPed()
+    local currentTime = GetGameTimer()
+    if currentTime - lastPurchaseTime < purchaseCooldown then
+        cb({ success = false, message = "Please wait before making another purchase" })
+        return
     end
     
-    cb('ok')
-end)
-
--- Events
-RegisterNetEvent('gs-blackmarket:notification')
-AddEventHandler('gs-blackmarket:notification', function(message, type)
-    ShowNotification(message, type)
-end)
-
-RegisterNetEvent('gs-blackmarket:setVendorLocation')
-AddEventHandler('gs-blackmarket:setVendorLocation', function(location)
-    currentVendorLocation = location
+    lastPurchaseTime = currentTime
     
-    if vendorPed then
-        DeletePed(vendorPed)
-        vendorPed = nil
+    TriggerServerEvent('gs-blackmarket:server:purchaseItem', {
+        dealerId = currentDealerData.id,
+        itemName = data.item,
+        quantity = data.quantity,
+        price = data.price
+    })
+    
+    cb({ success = true, message = "Processing purchase..." })
+end)
+
+RegisterNUICallback('checkoutCart', function(data, cb)
+    if not isMenuOpen or not currentDealerData then
+        cb({ success = false, message = "Menu is not open" })
+        return
     end
     
-    CreateVendorPed()
+    local currentTime = GetGameTimer()
+    if currentTime - lastPurchaseTime < purchaseCooldown then
+        cb({ success = false, message = "Please wait before making another purchase" })
+        return
+    end
+    
+    lastPurchaseTime = currentTime
+    
+    TriggerServerEvent('gs-blackmarket:server:checkoutCart', {
+        dealerId = currentDealerData.id,
+        items = data.items,
+        total = data.total
+    })
+    
+    cb({ success = true, message = "Processing checkout..." })
 end)
 
-RegisterNetEvent('gs-blackmarket:setMarketItems')
-AddEventHandler('gs-blackmarket:setMarketItems', function(cats, multipliers)
-    -- Process items and add images
-    for _, category in pairs(cats) do
-        for _, item in pairs(category.items) do
-            item.image = GetItemImage(item.name)
+RegisterNUICallback('closeMenu', function(data, cb)
+    CloseBlackMarketMenu()
+    cb({})
+end)
+
+AddEventHandler('gs-blackmarket:client:openMenu', function(dealerId)
+    for i, dealer in pairs(Config.Dealers) do
+        if dealer.id == dealerId then
+            currentDealerData = dealer
+            currentDealerItems = dealer.items
+            OpenBlackMarketMenu()
+            break
         end
     end
-    
-    -- Send complete data to NUI
+end)
+
+AddEventHandler('gs-blackmarket:client:closeMenu', function()
+    CloseBlackMarketMenu()
+end)
+
+AddEventHandler('gs-blackmarket:client:updatePrices', function(priceMultipliers)
     SendNUIMessage({
-        action = 'openMenu',
-        categories = cats,
-        priceMultipliers = multipliers,
-        config = Config.UI
+        action = 'updatePrices',
+        priceMultipliers = priceMultipliers
     })
-    SetNuiFocus(true, true)
 end)
 
-RegisterNetEvent('gs-blackmarket:updatePrices')
-AddEventHandler('gs-blackmarket:updatePrices', function(multipliers)
-    currentPriceMultipliers = multipliers
+AddEventHandler('gs-blackmarket:client:notifyPlayer', function(data)
+    if framework == 'qb' then
+        QBCore.Functions.Notify(data.message, data.type)
+    elseif framework == 'esx' then
+        ESX.ShowNotification(data.message)
+    else
+        SetNotificationTextEntry('STRING')
+        AddTextComponentString(data.message)
+        DrawNotification(false, false)
+    end
 end)
 
-RegisterNetEvent('gs-blackmarket:orderPlaced')
-AddEventHandler('gs-blackmarket:orderPlaced', function(orderData)
-    activeOrder = orderData
+AddEventHandler('gs-blackmarket:client:syncCooldown', function(dealerId, cooldownTime)
+    dealerCooldowns[dealerId] = GetGameTimer() + (cooldownTime * 1000)
+end)
+
+function DrawText3D(x, y, z, text)
+    local onScreen, _x, _y = World3dToScreen2d(x, y, z)
+    local px, py, pz = table.unpack(GetGameplayCamCoords())
     
-    -- Wait for delivery time
-    Citizen.SetTimeout(orderData.waitTime * 1000, function()
-        -- Create pickup point
-        CreatePickupBlip(orderData.location.coords)
-        CreatePickupPed(orderData.location)
-        
-        -- Notify player
-        ShowNotification(Config.Notifications.orderReady, 'success')
-    end)
-end)
+    SetTextScale(0.35, 0.35)
+    SetTextFont(4)
+    SetTextProportional(1)
+    SetTextColour(255, 255, 255, 215)
+    SetTextEntry("STRING")
+    SetTextCentre(1)
+    AddTextComponentString(text)
+    DrawText(_x, _y)
+    local factor = (string.len(text)) / 370
+    DrawRect(_x, _y + 0.0125, 0.015 + factor, 0.03, 41, 11, 41, 68)
+end
 
--- Resource Start
-AddEventHandler('onResourceStart', function(resourceName)
-    if resourceName ~= GetCurrentResourceName() then return end
-    
-    -- Request vendor location from server
-    Citizen.Wait(1000) -- Wait for server to initialize
-    TriggerServerEvent('gs-blackmarket:getVendorLocation')
-end)
-
-RegisterNetEvent('playerSpawned')
-AddEventHandler('playerSpawned', function()
-    -- Request vendor location from server when player spawns
-    TriggerServerEvent('gs-blackmarket:getVendorLocation')
-end)
-
+function table.clone(org)
+    local new = {}
+    for key, value in pairs(org) do
+        new[key] = value
+    end
+    return new
+end
 
 AddEventHandler('onResourceStop', function(resourceName)
-    if resourceName ~= GetCurrentResourceName() then return end
+    if GetCurrentResourceName() ~= resourceName then return end
     
-    -- Clean up resources
-    if vendorPed then
-        DeleteEntity(vendorPed)
-        vendorPed = nil
+    for _, blip in pairs(dealerBlips) do
+        RemoveBlip(blip)
     end
     
-    CleanupPickup()
+    for _, ped in pairs(dealerPeds) do
+        DeleteEntity(ped)
+    end
+    
+    if isMenuOpen then
+        CloseBlackMarketMenu()
+    end
 end)
