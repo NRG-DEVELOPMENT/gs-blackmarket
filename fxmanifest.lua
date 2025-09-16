@@ -2,8 +2,8 @@ fx_version 'cerulean'
 game 'gta5'
 
 author 'NRG Development'
-description 'Black Market Script for FiveM'
-version '1.1.0'
+description 'GS-BlackMarket - A comprehensive black market script for FiveM'
+version '1.0.0'
 
 shared_scripts {
     'config.lua'
@@ -22,3 +22,5 @@ ui_page 'ui/index.html'
 files {
     'ui/index.html'
 }
+
+lua54 'yes'
