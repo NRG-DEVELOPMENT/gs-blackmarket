@@ -3,7 +3,7 @@ game 'gta5'
 
 author 'NRG Development'
 description 'GS-BlackMarket - A comprehensive black market script for FiveM'
-version '1.0.0'
+version '1.5.0'
 
 shared_scripts {
     'config.lua'
